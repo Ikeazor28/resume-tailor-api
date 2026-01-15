@@ -1,0 +1,9 @@
+{
+  "name": "resume-tailor-api",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Resume tailoring microservice using Claude API",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.17.1"
+  }
+}

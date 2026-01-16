@@ -5,37 +5,48 @@ const anthropic = new Anthropic({
 });
 
 export default async function handler(req, res) {
-  // Enable CORS for all origins
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
   
-  // Handle preflight
+  // Handle OPTIONS request
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
   
   // Only allow POST
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    res.status(405).json({ error: 'Method not allowed. Use POST.' });
+    return;
   }
   
   try {
+    console.log('Received request to /api/tailor');
+    
     const { resumeText, jobDescription, apiKey } = req.body;
     
-    // Validate request
+    // Validate required fields
     if (!resumeText || !jobDescription) {
-      return res.status(400).json({ 
+      res.status(400).json({ 
+        success: false,
         error: 'Missing required fields: resumeText and jobDescription' 
       });
+      return;
     }
     
-    // Validate API key (protect your service)
+    // Validate API key
     if (apiKey !== process.env.SERVICE_API_KEY) {
-      return res.status(401).json({ error: 'Unauthorized - Invalid API key' });
+      res.status(401).json({ 
+        success: false,
+        error: 'Unauthorized - Invalid API key' 
+      });
+      return;
     }
     
-    console.log('Processing resume tailoring request...');
+    console.log('Calling Claude API...');
     
     // Call Claude API
     const message = await anthropic.messages.create({
@@ -47,13 +58,10 @@ export default async function handler(req, res) {
         content: `You are an expert resume writer. Create tailored resume content for a job posting.
 
 CRITICAL RULES:
-1. Each bullet MUST be 20-25 words with specific numbers and metrics
-2. Use exact keywords from job posting naturally (not forced)
-3. Be SPECIFIC not generic:
-   - ❌ "critical systems" → ✅ "payment processing infrastructure handling $10B+ annually"
-   - ❌ "enterprise environment" → ✅ "AWS cloud spanning 3 regions with 200+ EC2 instances"
-4. Include business outcomes with dollar amounts, percentages, or timelines
-5. Each bullet tells a story: [specific context] → [action with job keywords] → [quantified result]
+1. Each bullet MUST be 20-25 words with specific numbers
+2. Use exact keywords from job posting naturally
+3. Be SPECIFIC not generic
+4. Include business outcomes with metrics
 
 JOB DESCRIPTION:
 ${jobDescription}
@@ -61,62 +69,44 @@ ${jobDescription}
 ORIGINAL RESUME:
 ${resumeText}
 
-ANALYZE THE JOB:
-1. Extract top 5 requirements from job posting
-2. Identify responsibility keywords (for experience bullets)
-3. Identify qualification keywords (for summary only)
-4. Identify technical keywords (frameworks, tools, certifications)
-
-OUTPUT THIS EXACT JSON STRUCTURE (no markdown, no code blocks):
+OUTPUT THIS EXACT JSON (no markdown):
 
 {
-  "professionalTitle": "Exact job title from posting",
-  "frameworks": ["Key framework or cert from job", "Another framework"],
-  "summary": "3-4 sentences addressing the top 5 job requirements using their exact phrases. Start with job title, include years of experience, mention specific capabilities from job posting. Example: 'Cybersecurity Engineer with 8+ years leading RMF accreditation efforts and gaining/maintaining system ATOs across regulated environments. Proven expertise in POA&M development, SECONOPS documentation, and coordinating with multiple Approving Organizations. CISSP, CISM certified with deep DevSecOps implementation experience.'",
+  "professionalTitle": "Job title from posting",
+  "frameworks": ["Framework1", "Framework2"],
+  "summary": "3-4 sentences addressing top job requirements with exact phrases",
   "skills": {
-    "frameworks": ["SOX 404", "ISO 27001", "NIST RMF", "SSAE 18"],
-    "coreCompetencies": ["Competency from job responsibilities", "Another competency"],
-    "technical": ["Technical skill from job", "Another skill"],
-    "tools": ["Tool mentioned in job", "Another tool"]
+    "frameworks": ["SOX 404", "ISO 27001"],
+    "coreCompetencies": ["Skill1", "Skill2"],
+    "technical": ["Technical skill"],
+    "tools": ["Tool1", "Tool2"]
   },
   "experience": [
     {
-      "title": "Keep original job title from resume",
-      "company": "Keep original company name",
-      "location": "Keep original location",
-      "dates": "Keep original dates",
+      "title": "Original job title",
+      "company": "Original company",
+      "location": "Original location",
+      "dates": "Original dates",
       "bullets": [
-        "20-25 word bullet: [Specific context with numbers] + [Action using job keywords] + [Business outcome with dollar/percentage/timeline]. Example: 'Led 15+ IT audit engagements for Fortune 500 banking clients managing $2M+ budgets, maintaining 98% client satisfaction through proactive risk identification across 50+ SOX controls'",
-        "Another 20-25 word bullet with different job keywords and specific achievements",
-        "Continue with 4-6 bullets for current role, 3-4 for previous roles"
+        "20-25 word bullet with specific context, job keywords, and quantified results",
+        "Another specific bullet"
       ]
     }
   ]
 }
 
-QUALITY CHECKS BEFORE OUTPUTTING:
-1. ✓ Every bullet is 20-25 words? (count them!)
-2. ✓ Every bullet has specific numbers (counts, dollars, percentages)?
-3. ✓ No generic phrases ("critical systems", "various activities")?
-4. ✓ Job keywords naturally integrated (not keyword-stuffed)?
-5. ✓ Business outcomes clearly stated?
-6. ✓ Summary mirrors exact phrases from job posting?
-
-If ANY check fails, rewrite until they all pass.
-
-Output ONLY the JSON. No explanations, no markdown formatting.`
+Output ONLY the JSON.`
       }]
     });
     
-    // Parse Claude's response
+    // Parse response
     let content = message.content[0].text.trim();
     
-    // Remove markdown if Claude added it (sometimes it does)
+    // Remove markdown if present
     if (content.startsWith('```')) {
       content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     }
     
-    // Parse JSON
     const tailoredContent = JSON.parse(content);
     
     // Calculate cost
@@ -124,10 +114,10 @@ Output ONLY the JSON. No explanations, no markdown formatting.`
     const outputCost = (message.usage.output_tokens / 1000000) * 15;
     const totalCost = inputCost + outputCost;
     
-    console.log(`Request successful. Cost: $${totalCost.toFixed(4)}`);
+    console.log(`Success! Cost: $${totalCost.toFixed(4)}`);
     
-    // Return successful response
-    return res.status(200).json({
+    // Return success
+    res.status(200).json({
       success: true,
       content: tailoredContent,
       usage: {
@@ -139,10 +129,8 @@ Output ONLY the JSON. No explanations, no markdown formatting.`
     });
     
   } catch (error) {
-    console.error('Error processing request:', error);
-    
-    // Return error response
-    return res.status(500).json({
+    console.error('Error:', error);
+    res.status(500).json({
       success: false,
       error: error.message,
       type: error.constructor.name
